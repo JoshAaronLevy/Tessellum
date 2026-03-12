@@ -1,71 +1,386 @@
 # Code Review
 
-## High Priority Issues
+First off: this is a really strong capstone direction.
 
-### Fix `any` Type Usage
+There is a lot here that is genuinely impressive, especially for a student project: local-first storage, a Markdown editor, graph view, templates, wikilinks, a plugin system, Tauri desktop app structure, and some thoughtful UX ideas already in place. That is not small stuff.
 
-There are 32 instances of `any` type usage across the codebase. If the professor or person grading your work cares about TypeScript and type safety, this is a critical issue to address. No matter how good the functionality is, people who are sticklers about it will absolutely ding you **hard** for this.
+To keep things manageable, I organized the feedback by priority. If you only have limited time before the demo, start from the top and work your way down.
 
-**Suggestion**: Time box this. Search for `any` in your codebase and go through each one, spending no more than 5 minutes on each instance. For some, it will be a simple fix (e.g., replacing `any` with a specific type or interface). For others, it may require a bit more thought to define the correct types. But the key is to not get bogged down in trying to make it perfect. Just make it good enough and move on to the next one. You can always come back and try finish refining types later if you have time. Or if they are very difficult fixes, you can at least add a comment indicating that you had difficulty fixing it, and will revisit it before the next release. The point here is to show that you both did put in the effort, and that you do care about code quality.
+---
 
-### Fix TitleBar Critical Bug
+# Stage 1: 🚨 Fix This IMMEDIATELY (Demo-Blocking)
 
-The `TitleBar` component has a critical bug where the `appWindow` variable is defined inside the component, which made the app freeze up the moment it opened for me, because it was checking the `appWindow` hundreds of times per second. The fix is to move the `appWindow` variable outside of the component so that it is only initialized once, and also update the `useEffect` dependency array to include `appWindow` to ensure it is properly referenced.
+## TitleBar resize listener bug (causes runaway event loop)
 
-**NOTE**: I have already made this fix in the codebase, and you can see it more clearly in the pull request I made.
+When I first launched the app, it immediately froze the UI and started hammering the call stack.
 
-### Fix Build Errors
+Within about 20–30 seconds there were **thousands of calls firing**, and it started impacting my entire machine (other apps stopped responding). This kind of issue is extremely problematic, especially in a desktop app, because your app completely froze instantly (I was stuck on the opening page no matter what), I had very limited ability to open dev tools and debug, because it was happening so fast and just locked up the app, and drastically slowed down other apps on my machine, because of the CPU overload.
 
-The build command fails due to errors in `src/plugins/api/CommandAPI.ts` and `src/plugins/api/UIAPI.ts`. The errors state that `_app is defined but its value is never read.` But you can't just remove the lines without breaking the constructor. These need to be fixed for the project to be considered complete and functional.
+I do NOT want this to happen to you when you are demoing it. That would be crushing, especially with such a promising project.
 
-**NOTE**: I have already made this fix in the codebase, and you can see it more clearly in the pull request I made.
+### The root cause
 
-### ABSOLUTE MUST: Front-End Tests (Minimal is Fine)
+The issue comes from the `useEffect` in `TitleBar.tsx`.
 
-**IMPORTANT**: This is one of the things that often makes or breaks a junior dev landing a job. You do not need to spend a ton of time and effort on creating insanely thorough tests with high code coverage percentages. But you need just the basics.
+The original code listens to the window resize event like this:
 
-Think of it like this. You need **just enough** tests in the front-end to demonstrate that you understand and acknowledge the importance of having tests in your code. I don't care how fancy the rest of the app is. When it comes to hiring a junior dev (which I/we have done many times), we will pick the dev with a simple, solid app with some core tests over the dev with a fancy, complicated app with no tests any day of the week.
+```ts
+const unlisten = appWindow.listen('tauri://resize', checkMaximized);
+```
 
-**NOTE**: I added some base, core tests in this branch for you to look at to see what I'm talking about.
+Every resize event calls `checkMaximized`, which calls:
 
-## Other Improvements (Not Critical. But totally set you apart)
+```
+await appWindow.isMaximized()
+setIsMaximized(...)
+```
 
-### Update/Improve README.md
+This combination can easily create a **feedback loop** where the window state update triggers another resize event, which calls the effect again, which triggers another update, and so on.
 
-A great README.md should showcase what the app is, why you should use it (why Tessellum over other notetaking apps), and list core features with visual aids (GIFs are best. JPGs are an acceptable backup). And your logo is totally awesome. SO PUT IT IN THE README!! I'd fail you just for not putting such a cool logo at the top of your README.md (kidding, of course. But you gotta add it).
+In practice this resulted in:
 
-You do NOT need to spend extensive time on this. You can just install Kap on your computer and spend 10 or so minutes grabbing 3-5 second clips of cool features in the app. You can even borrow the source code from some awesome examples out there. Here are my faves:
+* thousands of repeated calls
+* massive event spam
+* the UI completely freezing
 
-- If you want something that's high-level highlights with a sweet visual presentation, check [reach](https://github.com/dmunish/reach/blob/main/README.md)
+This is a **show-stopping bug** because it can happen immediately when the app launches.
 
-- If you feel like you need to go deep into the weeds to explain how it works, different features, etc., that's ok. Just make it presentable, like with [Enquirer](https://github.com/enquirer/enquirer/blob/master/README.md)
+If this happens during your presentation demo, the entire app could freeze before you can show anything.
 
-- If there's a lot of content, but a variety of sections or topics and you want to make it easy to navigate, organized, and still aesthetically pleasing, check out [supabase-plus](https://github.com/dsplce-co/supabase-plus#readme)
+### How I fixed it in this branch
 
-- And if you absolutely hate my fave examples, that's totally fine. Check out [awesome-readme](https://github.com/matiassingers/awesome-readme). It's basically a repo that just showcases a list of like 100+ great README examples and pick one that you like
+Instead of constantly listening to resize events, the fix simply checks the window state when the component mounts and when the maximize button is pressed.
 
-### Add ToDo or Release Notes File
+That removes the event loop entirely.
 
-There are two types of tech employees: coders and developers. This is a nice touch because it emphasizes the type of employee you are. A coder (the vast majority of other students), will come up with an idea and run as fast as they can with it, trying to cram as many features in as possible before a deadline. They don't realize that an app with 10 features, but 8 they use, is more valuable to a user than one with 50 features, and 10 they use. Even though they technically use more features in the latter one, it is always a much worse user experience. Even talented coders with high standards put their focus into being able to write the cleanest code out there. But they often overlook the UI and UX details that make the user either keep coming back, or immediately delete the app and move on. **A great coder can write the cleanest code. A great developer solves problems with code.** There's a huge difference. And that difference separates you from over 90% of job applicants.
+Example of the safer pattern:
 
-So for this file, just have a section with a handful of checkboxes with a mix of technical things you aim to do, as well as features and bug fixes you plan to implement in the next release (even if it's after the project is over). An example can be as simple as this:
+```ts
+const appWindow = getCurrentWindow();
+
+useEffect(() => {
+  const checkMaximized = async () => {
+    try {
+      const maximized = await appWindow.isMaximized();
+      setIsMaximized(maximized);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  checkMaximized();
+}, [appWindow]);
+```
+
+Then the maximize button explicitly updates the state after toggling:
+
+```
+await appWindow.toggleMaximize()
+setIsMaximized(await appWindow.isMaximized())
+```
+
+This should be fixed **before anything else**.
+
+---
+
+# Stage 2: highest-value fixes
+
+After fixing the TitleBar issue above, these are the next most important improvements.
+
+---
+
+## 1) Prevent losing edits when switching notes or closing the app
+
+Right now the editor saves on a debounce (`setTimeout(..., 1000)`).
+
+That part is fine. The problem is what happens if the user:
+
+* types something
+* immediately clicks another note
+* closes the app
+* switches views quickly
+
+A pending save can get cleared before it writes, which means the user can lose their most recent changes.
+
+That kind of bug hurts trust fast in a note-taking app.
+
+### What to do
+
+* Flush pending saves when switching notes.
+* Flush on editor blur if there are unsaved changes.
+* Flush on app close/unmount if possible.
+* Consider tracking `isDirty` for real and using it to control save behavior.
+
+### Why this matters
+
+A note app can survive small UI issues.
+
+It **cannot survive “sometimes my text disappears.”**
+
+---
+
+## 2) Be careful with vault watchers / repeated refresh work
+
+Opening a vault triggers:
+
+* `watch_vault`
+* a full file tree refresh
+* file change listeners
+* periodic syncs
+
+This works, but systems like this can easily end up doing **more work than intended**.
+
+Risks include:
+
+* duplicate watchers
+* redundant full refreshes
+* graph reloads on every change
+* sluggish performance as vaults grow
+
+### What to do
+
+* Ensure watchers are cleaned up when vaults change.
+* Debounce bursts of file events.
+* Prefer targeted updates instead of full refreshes where possible.
+
+### Why this matters
+
+Performance issues often feel minor early, then get dramatically worse as the project grows.
+
+---
+
+## 3) Fix note creation from graph nodes so files are created in the correct location
+
+Double-clicking a missing graph node creates a new note.
+
+That’s a great feature idea.
+
+But the current implementation seems to derive the note title from the filename and then call `create_note` in a way that can create the new file **in the wrong location**.
+
+For example, if the node represents something nested, the file may not be created in the intended folder.
+
+### What to do
+
+* Preserve path information when creating notes from graph nodes.
+* If a node only has a name, create it in a clearly defined default location.
+* If it represents a path, pass that path to the backend.
+
+### Why this matters
+
+This is exactly the kind of feature people try during a demo.
+
+When it works, it feels magical.
+When it creates files in random places, it feels broken.
+
+---
+
+## 4) Fix modal flow so failed actions do not look successful
+
+`InputModal` currently closes immediately on submit.
+
+That means if a create/rename action fails asynchronously, the modal may disappear before the user can correct the input.
+
+### What to do
+
+* Let the parent decide when the modal closes.
+* Keep the modal open if the async action fails.
+* Show the error and let the user fix the value.
+
+### Why this matters
+
+This small change immediately makes the app feel more polished.
+
+---
+
+## 5) Replace obvious `any` usages
+
+There are several `any` types in places like:
+
+* plugin/event APIs
+* graph animation config
+* frontmatter parsing
+* editor helpers
+
+For a capstone project, functionality matters more than perfect typing. But professors often look for TypeScript discipline.
+
+### Recommendation
+
+Time-box this.
+
+Replace the most visible `any`s first:
+
+* public APIs
+* shared types
+* plugin interfaces
+* reusable helpers
+
+That gives the biggest credibility boost for the least effort.
+
+---
+
+# Stage 3: Important fixes after that
+
+## Remove or disable buttons that do nothing yet
+
+There are some UI controls that appear active but do nothing yet.
+
+Examples:
+
+* back / forward
+* search
+* settings
+* trash
+
+A dead button is worse than no button.
+
+### Recommendation
+
+Either:
+
+* hide unfinished buttons for the demo, or
+* disable them visually and label them "coming soon".
+
+This is an easy polish win.
+
+---
+
+## Persist more session state
+
+Right now the vault path persists, which is good.
+
+You could also persist:
+
+* last opened note
+* sidebar open/closed state
+* expanded folders
+* selected view mode
+
+That helps the app feel like a real desktop tool instead of a prototype.
+
+---
+
+## Be deliberate about store updates vs backend refreshes
+
+Some actions update local state immediately while also relying on backend watcher refreshes.
+
+That can create duplicate updates or UI flicker.
+
+Try to be consistent about which actions are:
+
+* optimistic updates
+* backend-confirmed updates
+
+Consistency here makes bugs easier to reason about.
+
+---
+
+## Revisit effect dependencies and initialization patterns
+
+Some patterns work but are fragile long term.
+
+Examples:
+
+* singleton checks like `(TessellumApp as any)._instance`
+* effects depending on `editorRef.current?.view`
+* repeated listener setup in components that re-render often
+
+These are not urgent problems, but they are good cleanup targets later.
+
+---
+
+## Add a small set of tests
+
+You do not need huge coverage.
+
+A handful of tests is enough to show good engineering discipline.
+
+Good targets include:
+
+* path helpers
+* graph mapping utilities
+* rename/path edge cases
+* frontmatter parsing
+* filename normalization
+
+I added some starter tests in this branch to show how they could look.
+
+---
+
+# Stage 4: Nice improvements that help the project feel complete
+
+## Improve the README
+
+The README currently explains architecture well, which is great.
+
+For a capstone/demo project it should also quickly answer:
+
+* What is Tessellum?
+* What makes it interesting?
+* What are the core features?
+* What does it look like?
+
+Easy upgrades:
+
+* logo at the top
+* 3–5 screenshots or GIFs
+* a "Key Features" section
+* a short "Why I built this" section
+
+This makes the repo feel much more polished.
+
+---
+
+## Add a small roadmap or release notes file
+
+A simple `ROADMAP.md` or `RELEASE-NOTES.md` showing:
+
+* completed features
+* near-term fixes
+* future ideas
+
+A good example would be something like:
 
 ```md
 # Release Notes
 
-## Upcoming [v0.3.1]
+## v0.1 - Demo Release
 
-### Planned Release Date: [03/31/2026]
+### Planned Features
 
-### Core Updates
+- Update base styling and UI polish in sidebar
+- Improve persistence of session state (last opened note, sidebar state, and window size are the priorities)
 
-- [ ] Fix remaining `any` type uses
-- [ ] Implement `Husky` to ensure lint and tests are run and need to pass in order to push code changes
-- [ ] Update the base styling to add more visual distinction between the sidebar and editor area
-- [ ] Improve state performance, to open the app in the previous window size, and open the last note that was open when the app is closed
+### Bug Fixes
 
-### Stretch Goals
+- Fix TitleBar resize listener bug (causes runaway event loop) - **critical for demo**
+- Fix `any` type references
 
-- [ ] Add a WYSIWYG Markdown editor with a vertical toolbar on the right side of the editor
-- [ ] Add a tabbed interface to the editor to allow users to have multiple notes open at once
+### Technical Improvements
+
+- Implement core front-end tests
+- Implement `Husky` to enforce tests are run before commits can be pushed
 ```
+
+This signals strong product thinking, not frantic coding.
+
+---
+
+# A realistic plan
+
+I know there are some features you want to add before the demo, and you should do so. So let's be smart about how to manage your time.
+
+My suggestion:
+ - Before ANYTHING, fix the TitleBar resize bug. That is a demo-blocker and can make the app look completely broken.
+ - After that, review the rest of the feedback and order them starting with the things you LEAST want to do first.
+  - This is important because you want to get the most painful or least fun stuff out of the way first, so you can build momentum and end on a high note. I only learned this after about 8 years of development. This trick will help you be the best dev you can be, and manage your energy and motivation better.
+ - Every day you sit down to work on the project, before writing a single line of code for a feature, knock out just one thing on the list (the thing at the top that you want to do the least).
+  - Don't spend more than an hour on it. If it is taking longer, then just commit what you have, then move on to the feature you're excited about. And just commit to coming back to it at the end of implementing the feature for no more than 30 minutes. That way you don't get burned out spinning your wheels and wasting a day on something that isn't rewarding. But you're still staying on top of the important fixes and making steady progress on them.
+  - If you get totally blocked on any of these, as long as it's not a bug that will possibly break the demo, then just make a note of it somewhere visible, that way whoever is grading the project can see you're aware of it and can tell you actually did put a lot of effort into trying to fix it, and still plan on fixing it after the demo when you have more time to work on it.
+
+That gives the biggest improvement in reliability and polish, while still letting you build the features you want to show off in the demo, and keeping your motivation high.
+
+---
+
+# Final thoughts
+
+This project has real potential. Just because there are a lot of suggestions and notes does not mean it is a bad idea or the code sucks. If I did think that, I wouldn't have written a review this in-depth. Nice work.
