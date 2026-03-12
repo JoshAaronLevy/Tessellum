@@ -6,11 +6,7 @@ import type { CalloutType } from "../../constants/callout-types";
  */
 export class UIAPI {
     private calloutTypes = new Map<string, CalloutType[]>(); // pluginId -> types
-    private _app: TessellumApp;
-
-    constructor(app: TessellumApp) {
-        this._app = app;
-    }
+    constructor(_app: TessellumApp) {}
 
     // --- Callout types (editor-specific) ---
 

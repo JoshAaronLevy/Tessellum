@@ -11,11 +11,7 @@ import type { Command } from "../types";
  */
 export class CommandAPI {
     private commands = new Map<string, Command[]>(); // pluginId -> commands
-    private _app: TessellumApp;
-
-    constructor(app: TessellumApp) {
-        this._app = app;
-    }
+    constructor(_app: TessellumApp) {}
 
     /** Register a command for a plugin. */
     register(pluginId: string, command: Command): void {

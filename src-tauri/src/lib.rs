@@ -6,6 +6,7 @@ pub mod models;
 mod utils;
 
 use db::Database;
+use std::fs;
 use tauri::Manager;
 
 pub use models::*;
@@ -19,25 +20,39 @@ pub fn run() {
         .plugin(tauri_plugin_persisted_scope::init())
         .setup(|app| {
             let app_handle = app.handle();
-            let db_url = app_handle
+            let app_data_dir = app_handle
                 .path()
                 .app_data_dir()
-                .expect("failed to get app data directory")
-                .join("vault.db")
-                .to_str()
-                .expect("failed to convert path to string")
-                .to_string();
-            
-            let db_instance = tauri::async_runtime::block_on(async move {
-                Database::init(&db_url).await.unwrap_or_else(|e| {
-                    log::error!("Failed to initialize database: {}", e);
-                    panic!("Failed to initialize database: {}", e);
-                })
-            });
-            
+                .expect("failed to get app data directory");
+
+            // Ensure parent directory exists before opening sqlite file.
+            fs::create_dir_all(&app_data_dir)?;
+
+            let db_path = app_data_dir.join("vault.db");
+
+            let db_url_for_init = db_path.to_string_lossy().to_string();
+            let db_url_for_error = db_url_for_init.clone();
+
+            let db_instance = tauri::async_runtime::block_on(Database::init(&db_url_for_init))
+                .map_err(|e| {
+                    log::error!(
+                        "Failed to initialize database at {}: {}",
+                        db_url_for_error,
+                        e
+                    );
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!(
+                            "Failed to initialize database at {}: {}",
+                            db_url_for_error,
+                            e
+                        ),
+                    )
+                })?;
+
             app.manage(models::AppState::new(db_instance));
             log::info!("Database initialized successfully");
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -73,50 +88,50 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
-    
+
     use commands::extract_wikilinks;
     use models::FileIndex;
-    
+
     #[test]
     fn test_extract_wikilinks() {
         let content = "Check out [[Note 1]] and [[folder/Note 2|Custom Text]]\
         . Also \\[[escaped]].";
         let links = extract_wikilinks(content);
-        
+
         assert_eq!(links.len(), 2);
         assert_eq!(links[0].target, "Note 1");
         assert_eq!(links[0].alias, None);
         assert_eq!(links[1].target, "folder/Note 2");
         assert_eq!(links[1].alias, Some("Custom Text".to_string()));
     }
-    
+
     #[test]
     fn test_file_index_resolution() {
         let dir = tempdir().unwrap();
         let vault_path = dir.path().to_str().unwrap();
-        
+
         // Create test structure
         fs::write(dir.path().join("Note1.md"), "content").unwrap();
-        
+
         let subfolder = dir.path().join("subfolder");
         fs::create_dir(&subfolder).unwrap();
         fs::write(subfolder.join("Note2.md"), "content").unwrap();
         fs::write(subfolder.join("Note1.md"), "duplicate name").unwrap();
-        
+
         let index = FileIndex::build(vault_path).unwrap();
-        
+
         // Test simple resolution
         let resolved = index.resolve(vault_path, "Note2");
         assert!(resolved.is_some());
         assert!(resolved.unwrap().ends_with("Note2.md"));
-        
+
         // Test that Note1 resolves to the one closest to root (shortest path)
         let resolved = index.resolve(vault_path, "Note1");
         assert!(resolved.is_some());
         let path = resolved.unwrap();
         assert!(path.ends_with("Note1.md"));
         assert!(!path.to_string_lossy().contains("subfolder"));
-        
+
         // Test path-based resolution
         let resolved = index.resolve(vault_path, "subfolder/Note1");
         assert!(resolved.is_some());

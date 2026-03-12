@@ -7,28 +7,37 @@ import {
 import { cn } from '../../lib/utils';
 import { useEditorStore } from '../../stores/editorStore';
 
+const appWindow = getCurrentWindow();
+
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false);
     const { toggleSidebar, isSidebarOpen, activeNote, toggleLocalGraph, isLocalGraphOpen } = useEditorStore();
-    const appWindow = getCurrentWindow();
 
     useEffect(() => {
         const checkMaximized = async () => {
             try {
                 const maximized = await appWindow.isMaximized();
                 setIsMaximized(maximized);
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error(e);
+            }
         };
+
         checkMaximized();
-        const unlisten = appWindow.listen('tauri://resize', checkMaximized);
-        return () => { unlisten.then(f => f()); }
-    }, []);
+    }, [appWindow]);
 
     const handleMinimize = () => appWindow.minimize();
+
     const handleMaximize = async () => {
-        await appWindow.toggleMaximize();
-        setIsMaximized(await appWindow.isMaximized());
+        try {
+            await appWindow.toggleMaximize();
+            const maximized = await appWindow.isMaximized();
+            setIsMaximized(maximized);
+        } catch (e) {
+            console.error(e);
+        }
     };
+
     const handleClose = () => appWindow.close();
 
     return (
@@ -39,18 +48,16 @@ export function TitleBar() {
                 "bg-white dark:bg-[#1a242f] border-b border-gray-200 dark:border-gray-800 text-gray-500"
             )}
         >
-            {/* --- LEFT SECTION: Navigation & Sidebar --- */}
-            <div className="flex items-center px-2 gap-1 h-full"
-                 style={{ paddingLeft: "0.4rem", paddingRight: "1rem", paddingTop: "1px", paddingBottom: "1px" }}>
-                {/* Sidebar Toggle */}
+            <div
+                className="flex items-center px-2 gap-1 h-full"
+                style={{ paddingLeft: "0.4rem", paddingRight: "1rem", paddingTop: "1px", paddingBottom: "1px" }}
+            >
                 <NavButton onClick={toggleSidebar} active={isSidebarOpen} tooltip="Toggle Sidebar">
                     <PanelLeft size={16} />
                 </NavButton>
 
-                {/* Separator (Optional, visual spacer) */}
                 <div className="w-2" />
 
-                {/* Obsidian-style Navigation (Visual placeholders for now) */}
                 <NavButton onClick={() => { }} tooltip="Go back">
                     <ArrowLeft size={16} />
                 </NavButton>
@@ -58,14 +65,11 @@ export function TitleBar() {
                     <ArrowRight size={16} />
                 </NavButton>
 
-                {/* Search Icon */}
                 <NavButton onClick={() => { }} tooltip="Search">
                     <Search size={16} />
                 </NavButton>
             </div>
 
-            {/* --- TITLE SECTION: File Name --- */}
-            {/* This mimics the "Project Ideas.md" part of your image */}
             <div
                 className="flex items-center gap-2 px-4 text-xs font-medium text-gray-700 dark:text-gray-300 pointer-events-none opacity-80"
                 data-tauri-drag-region
@@ -80,25 +84,23 @@ export function TitleBar() {
                 )}
             </div>
 
-            {/* --- RIGHT SECTION: Local Graph, Status & Window Controls --- */}
             <div className="flex items-center h-full">
-                {/* Local Graph Toggle */}
                 <NavButton onClick={toggleLocalGraph} active={isLocalGraphOpen} tooltip="Toggle Local Graph">
                     <GitFork size={16} />
                 </NavButton>
 
                 <div className="w-2" />
 
-                {/* "EDITING" Status Badge from image */}
-                <div className="hidden sm:flex items-center gap-1.5 px-3 mr-2 text-[10px] font-bold text-gray-400 tracking-wider"
-                     style={{ paddingLeft: "1rem", paddingRight: "1rem", paddingTop: "1px", paddingBottom: "1px" }}>
+                <div
+                    className="hidden sm:flex items-center gap-1.5 px-3 mr-2 text-[10px] font-bold text-gray-400 tracking-wider"
+                    style={{ paddingLeft: "1rem", paddingRight: "1rem", paddingTop: "1px", paddingBottom: "1px" }}
+                >
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500/50"></span>
                     EDITING
                 </div>
 
                 <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-700 mx-1" />
 
-                {/* Window Controls */}
                 <WindowButton onClick={handleMinimize}>
                     <Minus size={14} strokeWidth={2} />
                 </WindowButton>
@@ -113,7 +115,6 @@ export function TitleBar() {
     );
 }
 
-// Helper for Navigation Buttons (Left side)
 interface NavButtonProps {
     onClick: () => void;
     children: React.ReactNode;
@@ -137,7 +138,6 @@ function NavButton({ onClick, children, active, tooltip }: NavButtonProps) {
     );
 }
 
-// Helper for Window Controls (Right side)
 interface WindowButtonProps {
     onClick: () => void;
     children: React.ReactNode;
