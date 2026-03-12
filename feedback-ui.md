@@ -18,6 +18,7 @@
   - Have it as just a regular button without the chevron, since there isn't currently a dropdown option. This would be the simplest solution.
   - Or, have the button label say `Add New` instead of `New File`, and then have the dropdown options be `File` and `Folder` (and remove the `New Folder` button next to it, as it becomes redundant with this solution).
     - NOTE: With this option, you would have to either make the whole button a dropdown (so clicking anywhere on the button opens the dropdown), or keep the split button, but decide what the default action is when clicking the main part of the button (not the chevron).
+10. **BONUS**: Update the app icon (not logo) to be the core icon of the logo instead of the full logo with the name in it. It looks cleaner as an icon on various devices. And your logo/icon is really cool. So I think it's a touch that's worth implementing. I added an example in this repo of what I mean (but I moved the old ones into an `src-tauri/icons/archive` folder. I didn't get rid of them).
 
 ## Feature Suggestions and Opportunities for Improvement
 
