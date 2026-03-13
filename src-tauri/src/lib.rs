@@ -6,10 +6,40 @@ pub mod models;
 mod utils;
 
 use db::Database;
-use std::fs;
-use tauri::Manager;
+use serde::{Deserialize, Serialize};
+use std::{fs, path::Path};
+use tauri::{Manager, PhysicalSize, WindowEvent};
 
 pub use models::*;
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const WINDOW_STATE_FILE: &str = "window-state.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedWindowState {
+    width: u32,
+    height: u32,
+}
+
+fn window_state_path(app_data_dir: &Path) -> std::path::PathBuf {
+    app_data_dir.join(WINDOW_STATE_FILE)
+}
+
+fn load_window_state(app_data_dir: &Path) -> Option<SavedWindowState> {
+    let state_path = window_state_path(app_data_dir);
+    let contents = fs::read_to_string(state_path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+fn save_window_state(app_data_dir: &Path, state: &SavedWindowState) {
+    let state_path = window_state_path(app_data_dir);
+
+    if let Ok(contents) = serde_json::to_vec_pretty(state) {
+        if let Err(error) = fs::write(&state_path, contents) {
+            log::warn!("Failed to persist window state to {:?}: {}", state_path, error);
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -52,6 +82,50 @@ pub fn run() {
 
             app.manage(models::AppState::new(db_instance));
             log::info!("Database initialized successfully");
+
+            if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                if let Some(saved_size) = load_window_state(&app_data_dir) {
+                    if let Err(error) = main_window.set_size(PhysicalSize::new(saved_size.width, saved_size.height)) {
+                        log::warn!("Failed to restore saved window size: {}", error);
+                    }
+                    if let Err(error) = main_window.center() {
+                        log::warn!("Failed to center window after restoring size: {}", error);
+                    }
+                }
+
+                let state_dir = app_data_dir.clone();
+                let event_window = main_window.clone();
+                main_window.on_window_event(move |event| match event {
+                    WindowEvent::Resized(size) => {
+                        // Ignore transient zero sizes some platforms can emit during minimize/init.
+                        if size.width > 0 && size.height > 0 {
+                            save_window_state(
+                                &state_dir,
+                                &SavedWindowState {
+                                    width: size.width,
+                                    height: size.height,
+                                },
+                            );
+                        }
+                    }
+                    WindowEvent::CloseRequested { .. } => {
+                        if let Ok(size) = event_window.inner_size() {
+                            if size.width > 0 && size.height > 0 {
+                                save_window_state(
+                                    &state_dir,
+                                    &SavedWindowState {
+                                        width: size.width,
+                                        height: size.height,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
+                });
+            } else {
+                log::warn!("Main window '{}' not found during setup", MAIN_WINDOW_LABEL);
+            }
 
             Ok(())
         })

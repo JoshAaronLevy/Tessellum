@@ -13,7 +13,8 @@ import { lightTheme } from "./themes/lightTheme";
 import { useEditorExtensions } from "./hooks/useEditorExtensions";
 import { CalloutType } from "../../constants/callout-types";
 import { TessellumApp } from "../../plugins/TessellumApp";
-import {EditorView} from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
+import { EditorToolbar } from "./EditorToolbar";
 
 export function Editor() {
     const { activeNote, vaultPath } = useEditorStore();
@@ -38,9 +39,11 @@ export function Editor() {
     // Table picker state
     const [tablePickerOpen, setTablePickerOpen] = useState(false);
     const [tablePickerPos, setTablePickerPos] = useState({ x: 0, y: 0, placement: 'bottom' as 'top' | 'bottom' });
+    const [isEditing, setIsEditing] = useState(false);
 
     // Store the slash position so we can insert text at the right place
     const slashPosRef = useRef<number | null>(null);
+    const editorShellRef = useRef<HTMLDivElement>(null);
 
     // WikiLink suggestions hook
     const { wikiLinkSuggestionsExtension, wikiLinkSuggestionsProps } = useWikiLinkSuggestions(vaultPath || "");
@@ -182,6 +185,23 @@ export function Editor() {
         editorRef.current?.view?.focus();
     }, []);
 
+    const handleEditorFocus = useCallback(() => {
+        setIsEditing(true);
+    }, []);
+
+    const handleEditorBlur = useCallback(() => {
+        requestAnimationFrame(() => {
+            const activeElement = document.activeElement;
+            const shell = editorShellRef.current;
+
+            if (shell && activeElement instanceof Node && shell.contains(activeElement)) {
+                return;
+            }
+
+            setIsEditing(false);
+        });
+    }, []);
+
     if (!activeNote) {
         return (
             <div className="h-full flex items-center justify-center select-none">
@@ -208,82 +228,102 @@ export function Editor() {
             </div>
 
             {/* EDITOR AREA */}
-            <div className="flex-1 w-full relative min-h-0 cursor-text">
-                <CodeMirror
-                    ref={editorRef}
-                    key={activeNote.path}
-                    value={content}
-                    extensions={[
-                        ...pluginExtensions,
-                        slashExtension,
-                        wikiLinkSuggestionsExtension,
-                        lightTheme
-                    ]}
-                    onChange={handleContentChange}
-                    height="100%"
+            <div
+                ref={editorShellRef}
+                className="flex flex-1 w-full min-h-0 relative overflow-hidden"
+                onFocusCapture={handleEditorFocus}
+                onBlurCapture={handleEditorBlur}
+            >
+                <div className="flex-1 relative min-h-0 cursor-text">
+                    <CodeMirror
+                        ref={editorRef}
+                        key={activeNote.path}
+                        value={content}
+                        extensions={[
+                            ...pluginExtensions,
+                            slashExtension,
+                            wikiLinkSuggestionsExtension,
+                            lightTheme
+                        ]}
+                        onChange={handleContentChange}
+                        height="100%"
+                        className={cn(
+                            "h-full w-full",
+                            (slashProps.isOpen || wikiLinkSuggestionsProps.isOpen || calloutPickerOpen || tablePickerOpen) && "[&_.cm-scroller]:!overflow-hidden"
+                        )}
+                        theme={lightTheme}
+                        basicSetup={{
+                            lineNumbers: false,
+                            foldGutter: false,
+                            highlightActiveLine: false,
+                            highlightActiveLineGutter: false,
+                        }}
+                    />
+
+                    <SlashMenu
+                        isOpen={slashProps.isOpen}
+                        x={slashProps.position.x}
+                        y={slashProps.position.y}
+                        placement={slashProps.position.placement}
+                        selectedIndex={slashProps.selectedIndex}
+                        commands={slashProps.filteredCommands}
+                        setSelectedIndex={slashProps.setSelectedIndex}
+                        onSelect={handleSlashSelect}
+                        onClose={() => { slashProps.closeMenu(); }}
+                    />
+
+                    <CalloutPicker
+                        isOpen={calloutPickerOpen}
+                        x={calloutPickerPos.x}
+                        y={calloutPickerPos.y}
+                        placement={calloutPickerPos.placement}
+                        selectedIndex={calloutPickerIndex}
+                        setSelectedIndex={setCalloutPickerIndex}
+                        onSelect={handleCalloutSelect}
+                        onClose={closeCalloutPicker}
+                    />
+
+                    <TableSizePicker
+                        isOpen={tablePickerOpen}
+                        x={tablePickerPos.x}
+                        y={tablePickerPos.y}
+                        placement={tablePickerPos.placement}
+                        onSelect={handleTableSelect}
+                        onClose={closeTablePicker}
+                    />
+
+                    <WikiLinkSuggestionsMenu
+                        isOpen={wikiLinkSuggestionsProps.isOpen}
+                        x={wikiLinkSuggestionsProps.position.x}
+                        y={wikiLinkSuggestionsProps.position.y}
+                        placement={wikiLinkSuggestionsProps.position.placement}
+                        selectedIndex={wikiLinkSuggestionsProps.selectedIndex}
+                        suggestions={wikiLinkSuggestionsProps.filteredSuggestions}
+                        setSelectedIndex={wikiLinkSuggestionsProps.setSelectedIndex}
+                        query={wikiLinkSuggestionsProps.query}
+                        onSelect={(suggestion) => {
+                            if (editorRef.current?.view) {
+                                wikiLinkSuggestionsProps.insertWikiLink(editorRef.current.view, suggestion);
+                            }
+                        }}
+                        onClose={() => { wikiLinkSuggestionsProps.closeMenu(); }}
+                    />
+                </div>
+
+                <div
                     className={cn(
-                        "h-full w-full",
-                        (slashProps.isOpen || wikiLinkSuggestionsProps.isOpen || calloutPickerOpen || tablePickerOpen) && "[&_.cm-scroller]:!overflow-hidden"
+                        "pointer-events-none absolute inset-y-0 right-2 z-20 hidden md:flex justify-end px-6 transition-all duration-500 ease-out",
+                        isEditing ? "translate-x-0 opacity-100" : "translate-x-[calc(100%+24px)] opacity-0"
                     )}
-                    theme={lightTheme}
-                    basicSetup={{
-                        lineNumbers: false,
-                        foldGutter: false,
-                        highlightActiveLine: false,
-                        highlightActiveLineGutter: false,
-                    }}
-                />
-
-                <SlashMenu
-                    isOpen={slashProps.isOpen}
-                    x={slashProps.position.x}
-                    y={slashProps.position.y}
-                    placement={slashProps.position.placement}
-                    selectedIndex={slashProps.selectedIndex}
-                    commands={slashProps.filteredCommands}
-                    setSelectedIndex={slashProps.setSelectedIndex}
-                    onSelect={handleSlashSelect}
-                    onClose={() => { slashProps.closeMenu(); }}
-                />
-
-                <CalloutPicker
-                    isOpen={calloutPickerOpen}
-                    x={calloutPickerPos.x}
-                    y={calloutPickerPos.y}
-                    placement={calloutPickerPos.placement}
-                    selectedIndex={calloutPickerIndex}
-                    setSelectedIndex={setCalloutPickerIndex}
-                    onSelect={handleCalloutSelect}
-                    onClose={closeCalloutPicker}
-                />
-
-                <TableSizePicker
-                    isOpen={tablePickerOpen}
-                    x={tablePickerPos.x}
-                    y={tablePickerPos.y}
-                    placement={tablePickerPos.placement}
-                    onSelect={handleTableSelect}
-                    onClose={closeTablePicker}
-                />
-
-                <WikiLinkSuggestionsMenu
-                    isOpen={wikiLinkSuggestionsProps.isOpen}
-                    x={wikiLinkSuggestionsProps.position.x}
-                    y={wikiLinkSuggestionsProps.position.y}
-                    placement={wikiLinkSuggestionsProps.position.placement}
-                    selectedIndex={wikiLinkSuggestionsProps.selectedIndex}
-                    suggestions={wikiLinkSuggestionsProps.filteredSuggestions}
-                    setSelectedIndex={wikiLinkSuggestionsProps.setSelectedIndex}
-                    query={wikiLinkSuggestionsProps.query}
-                    onSelect={(suggestion) => {
-                        if (editorRef.current?.view) {
-                            wikiLinkSuggestionsProps.insertWikiLink(editorRef.current.view, suggestion);
-                        }
-                    }}
-                    onClose={() => { wikiLinkSuggestionsProps.closeMenu(); }}
-                />
+                    aria-hidden={!isEditing}
+                >
+                    <div className="pointer-events-auto">
+                        <div className="sticky top-20">
+                            <EditorToolbar />
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     );
 }
-
