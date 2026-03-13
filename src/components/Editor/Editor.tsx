@@ -1,6 +1,6 @@
 import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useEditorStore } from '../../stores/editorStore';
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useSlashCommand, useWikiLinkSuggestions } from "./hooks";
 import { Command } from "../../plugins/types";
 import { SlashMenu } from "./SlashMenu";
@@ -13,8 +13,13 @@ import { lightTheme } from "./themes/lightTheme";
 import { useEditorExtensions } from "./hooks/useEditorExtensions";
 import { CalloutType } from "../../constants/callout-types";
 import { TessellumApp } from "../../plugins/TessellumApp";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { EditorToolbar } from "./EditorToolbar";
+import { isBoldActive, toggleBold } from "./toolbar/markdownFormatting";
+
+type ToolbarState = {
+    bold: boolean;
+};
 
 export function Editor() {
     const { activeNote, vaultPath } = useEditorStore();
@@ -40,6 +45,7 @@ export function Editor() {
     const [tablePickerOpen, setTablePickerOpen] = useState(false);
     const [tablePickerPos, setTablePickerPos] = useState({ x: 0, y: 0, placement: 'bottom' as 'top' | 'bottom' });
     const [isEditing, setIsEditing] = useState(false);
+    const [toolbarState, setToolbarState] = useState<ToolbarState>({ bold: false });
 
     // Store the slash position so we can insert text at the right place
     const slashPosRef = useRef<number | null>(null);
@@ -202,6 +208,74 @@ export function Editor() {
         });
     }, []);
 
+    const handleToolbarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
+        event.preventDefault();
+        setIsEditing(true);
+    }, []);
+
+    const syncToolbarState = useCallback((view: EditorView) => {
+        const selection = view.state.selection.main;
+        const nextBold = isBoldActive(view.state.doc.toString(), {
+            from: selection.from,
+            to: selection.to,
+        });
+
+        setToolbarState((current) => current.bold === nextBold ? current : { bold: nextBold });
+    }, []);
+
+    const handleBoldToggle = useCallback((explicitView?: EditorView) => {
+        const view = explicitView ?? editorRef.current?.view;
+        if (!view) {
+            return false;
+        }
+
+        const selection = view.state.selection.main;
+        const result = toggleBold(view.state.doc.toString(), {
+            from: selection.from,
+            to: selection.to,
+        });
+
+        view.dispatch({
+            changes: result.change,
+            selection: {
+                anchor: result.selection.from,
+                head: result.selection.to,
+            },
+            userEvent: "input",
+        });
+
+        setToolbarState({
+            bold: isBoldActive(result.text, result.selection),
+        });
+        view.focus();
+
+        return true;
+    }, []);
+
+    const toolbarExtensions = useMemo(() => ([
+        EditorView.updateListener.of((update) => {
+            if (update.docChanged || update.selectionSet || update.focusChanged) {
+                syncToolbarState(update.view);
+            }
+        }),
+        keymap.of([
+            {
+                key: "Mod-b",
+                run: (view) => handleBoldToggle(view),
+            },
+        ]),
+    ]), [handleBoldToggle, syncToolbarState]);
+
+    useEffect(() => {
+        const view = editorRef.current?.view;
+        if (!view) {
+            setToolbarState({ bold: false });
+            return;
+        }
+
+        syncToolbarState(view);
+    }, [activeNote?.path, content, syncToolbarState]);
+
     if (!activeNote) {
         return (
             <div className="h-full flex items-center justify-center select-none">
@@ -241,6 +315,7 @@ export function Editor() {
                         value={content}
                         extensions={[
                             ...pluginExtensions,
+                            ...toolbarExtensions,
                             slashExtension,
                             wikiLinkSuggestionsExtension,
                             lightTheme
@@ -319,7 +394,11 @@ export function Editor() {
                 >
                     <div className="pointer-events-auto">
                         <div className="sticky top-20">
-                            <EditorToolbar />
+                            <EditorToolbar
+                                toolbarState={toolbarState}
+                                onBoldToggle={() => { handleBoldToggle(); }}
+                                onToolbarMouseDown={handleToolbarMouseDown}
+                            />
                         </div>
                     </div>
                 </div>
